@@ -4,6 +4,6 @@ Old version available in \legacy for archivation purposes.
 
 Basic commands
     ```
-    /disconnect
+    /disconnect<br/> 
     /send <filename>
     ```
