@@ -1,17 +1,92 @@
 import socket
+import struct
 import threading
 from enum import Enum
 
-class State(Enum):
-    INPUT = 0
-    HANDSHAKE = 1
-    CONNECTED = 2
 
 # PORT = 8880;PEER_PORT = 8888
 PORT = 8888;PEER_PORT = 8880
 
 PEER_IP = "127.0.0.1"
 BUFFER_SIZE = 1024
+MAX_FRAGMENT_SIZE = 1400
+
+
+class State(Enum):
+    INPUT = 0
+    HANDSHAKE = 1
+    CONNECTED = 2
+
+
+class Communication():
+    fragment_size = MAX_FRAGMENT_SIZE
+
+    def __init__(self):
+        pass
+
+    def endConnection():
+        pass
+
+    def heartbeat():
+        pass
+        
+
+class Data():
+
+    def __init__(self):
+        pass
+
+    def encodePacket(self, data):
+        flags = (self.ack << 7) | (self.syn << 6) | (self.fin << 5) | (self.err << 4) | (self.sfs << 3) | (self.lfg << 2) | (self.ftr << 1)
+        checksum = self.calculateChecksum(data.encode('utf-8'))
+
+        if (self.ftr==1 and self.seq_num==2 and CORRUPT):
+            checksum = 0
+            CORRUPT = False
+
+        header = struct.pack(
+            '!IIBH',
+            self.ack_num,          # 32b
+            self.seq_num,          # 32b
+            flags,                 # 8b
+            checksum,              # 16b
+        )
+        return header + data.encode('utf-8')
+
+    def decodePacket(self, packet):
+        header = packet[:11]
+        ack_num, seq_num, flags, checksum = struct.unpack('!IIBH', header)
+        data = packet[11:].decode('utf-8')
+        return Packet(
+            ack_num=ack_num,
+            seq_num=seq_num,
+            ack=(flags >> 7) & 1,
+            syn=(flags >> 6) & 1,
+            fin=(flags >> 5) & 1,
+            err=(flags >> 4) & 1,
+            sfs=(flags >> 3) & 1,
+            lfg=(flags >> 2) & 1,
+            ftr=(flags >> 1) & 1,
+            checksum=checksum,
+            data=data
+        )
+
+    def calculateChecksum(self, data):
+        polynomial = 0x8005
+        crc = 0xFFFF
+
+        for byte in data:
+            crc ^= (byte << 8)
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = (crc << 1) ^ polynomial
+                else:
+                    crc <<= 1
+                crc &= 0xFFFF
+
+        crc ^= 0xFFFF
+        return crc
+
 
 def main():
     state = State.INPUT
@@ -41,82 +116,12 @@ def receive(sock, src_ip, src_port):
         data, addr = sock.recvfrom(BUFFER_SIZE)
         print(f"{addr[0]}:{addr[1]} >> {data.decode()}")
 
+
 def sender(sock, peer_ip, peer_port):
     msg = input("\n")
     sock.sendto(msg.encode(), (peer_ip, peer_port))
 
 
-def calculateChecksum(data):
-        polynomial = 0x8005
-        crc = 0xFFFF
-
-        for byte in data:
-            crc ^= (byte << 8)
-            for _ in range(8):
-                if crc & 0x8000:
-                    crc = (crc << 1) ^ polynomial
-                else:
-                    crc <<= 1
-                crc &= 0xFFFF
-
-        crc ^= 0xFFFF
-        return crc
-
 if __name__ == "__main__":
     main()
     
-
-
-
-    
-class Packet:
-    def __init__(self, ack_num=0, seq_num=0, ack=0, syn=0, fin=0, err=0, sfs=0, lfg=0, ftr=0, checksum=0, data=""):
-        self.ack_num = ack_num
-        self.seq_num = seq_num
-        self.ack = ack
-        self.syn = syn
-        self.fin = fin
-        self.err = err
-        self.sfs = sfs
-        self.lfg = lfg
-        self.ftr = ftr
-        self.checksum = checksum
-        self.data = data
-
-    def toBytes(self):
-        global CORRUPT
-        flags = (self.ack << 7) | (self.syn << 6) | (self.fin << 5) | (self.err << 4) | (self.sfs << 3) | (self.lfg << 2) | (self.ftr << 1)
-        checksum = self.calculateChecksum(self.data.encode('utf-8'))
-
-        if (self.ftr==1 and self.seq_num==2 and CORRUPT):
-            checksum = 0
-            CORRUPT = False
-
-        header = struct.pack(
-            '!IIBH',
-            self.ack_num,          # 32b
-            self.seq_num,          # 32b
-            flags,                 # 8b
-            checksum,              # 16b
-        )
-        return header + self.data.encode('utf-8')
-
-    @staticmethod
-    def fromBytes(packet):
-        header = packet[:11]
-        ack_num, seq_num, flags, checksum = struct.unpack('!IIBH', header)
-        data = packet[11:].decode('utf-8')
-
-        return Packet(
-            ack_num=ack_num,
-            seq_num=seq_num,
-            ack=(flags >> 7) & 1,
-            syn=(flags >> 6) & 1,
-            fin=(flags >> 5) & 1,
-            err=(flags >> 4) & 1,
-            sfs=(flags >> 3) & 1,
-            lfg=(flags >> 2) & 1,
-            ftr=(flags >> 1) & 1,
-            checksum=checksum,
-            data=data
-        )
