@@ -114,7 +114,7 @@ def receive(sock, src_ip, src_port):
         packet, addr = sock.recvfrom(BUFFER_SIZE)
         bytes = pd.parsePacket(packet)
         
-        print(f"{addr[0]}:{addr[1]} >> {bytes[8].decode()}")
+        print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
 
 
 def handleInput(sock, peer_ip, peer_port):
@@ -134,8 +134,8 @@ def handleInput(sock, peer_ip, peer_port):
     #     self.trerminateConnection()
     # else:
     pd = PacketData()
-    pd.createPacket(user_input, ack_num=0, seq_num=0, window_size=0)
-    sock.sendto(user_input.encode(), (peer_ip, peer_port))
+    packet = pd.createPacket(user_input, 0, 0, 0)
+    sock.sendto(packet, (peer_ip, peer_port))
 
 
 # def sendText(self, message):
