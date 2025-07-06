@@ -4,6 +4,8 @@ all packets are numbered, beginning with randomly generated ISN (initial sequenc
 
 avoided using class with packets because when making reliable udp connection with file transfer, we have to handle too many packets so the process needs to be very minimal and fast. Just unpack, validate and return
 
+received packets get put into a queue
+
 handshake -> establish connection -> new Connection()
 
 THREADS:

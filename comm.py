@@ -1,3 +1,5 @@
+import queue
+import random
 import socket
 import struct
 import threading
@@ -12,10 +14,12 @@ class State(Enum):
 PORT = 8888;PEER_PORT = 8880
 PEER_IP = "127.0.0.1"
 
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 2048
 MAX_FRAGMENT_SIZE = 1400
 
 G_state = State.INPUT
+packet_queue = queue.Queue()
+handshake_queue = queue.Queue()
 
 
 class Communication():
@@ -96,8 +100,9 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     threading.Thread(target=receive, args=(sock, src_ip, src_port), daemon=True).start()
 
-    #state = State.HANDSHAKE
-    #TODO handshake
+    G_state = State.HANDSHAKE
+    #TODO 
+    handshake(sock)
 
     G_state = State.CONNECTED
     
@@ -111,10 +116,61 @@ def receive(sock, src_ip, src_port):
     sock.bind((src_ip, src_port))
 
     while True:
-        packet, addr = sock.recvfrom(BUFFER_SIZE)
-        bytes = pd.parsePacket(packet)
+        try:
+            packet, addr = sock.recvfrom(BUFFER_SIZE)
+            bytes = pd.parsePacket(packet)
+            if (G_state == State.HANDSHAKE):
+                handshake_queue.put(bytes)
+            else:
+                packet_queue.put(bytes)
+        except Exception as e:
+            print("Receiver error:", e)
+
+    # while True:
+    #     packet, addr = sock.recvfrom(BUFFER_SIZE)
+    #     bytes = pd.parsePacket(packet)
         
-        print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
+    #     print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
+
+def handshake(sock):
+    pd = PacketData()
+    seq = random.randint(0, 10000)
+    peer_seq = None
+
+    while True:
+        try:
+            packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
+            parsed = pd.parsePacket(packet)
+            #handle_packet(parsed)
+        except queue.Empty:
+            print("No reply to SYN...")
+            continue
+    # Step 1: Send SYN
+    sock.sendto(createPacket(b'', ack_num=0, seq_num=my_seq, window_size=0, syn=1), )
+
+    while True:
+        packet = receive_packet()
+        ack_num, seq_num, ack, syn, fin, ctr, win, checksum, data = parsePacket(packet)
+
+        if state == "INIT" and syn and ack:
+            # Step 2: Received SYN+ACK
+            their_seq = seq_num
+            state = "HANDSHAKE_ACK"
+            send_packet(createPacket(b'', ack_num=their_seq + 1, seq_num=my_seq + 1, window_size=0, ack=1))
+            state = "ESTABLISHED"
+            print("Connection established")
+
+        elif state == "INIT" and syn:
+            # Step 1 (mirror): they initiated handshake
+            their_seq = seq_num
+            my_seq = random.randint(0, 10000)
+            (createPacket(b'', ack_num=their_seq + 1, seq_num=my_seq, window_size=0, syn=1, ack=1))
+            state = "WAIT_ACK"
+
+        elif state == "WAIT_ACK" and ack:
+            # Step 3: they responded with final ACK
+            state = "ESTABLISHED"
+            print("Connection established")
 
 
 def handleInput(sock, peer_ip, peer_port):
