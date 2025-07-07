@@ -91,6 +91,7 @@ class PacketData():
 
 
 def main():
+    global G_state
     src_ip = PEER_IP
     peer_ip = PEER_IP #input("[INPUT] peer IP address: ").strip()
     src_port = PORT #int(input("[INPUT] listening port: ").strip())
@@ -102,9 +103,8 @@ def main():
 
     G_state = State.HANDSHAKE
     #TODO 
-    handshake(sock)
-
-    G_state = State.CONNECTED
+    print("starting handshake")
+    handshake(sock, peer_ip, peer_port)
     
     while True:
         if (G_state == State.CONNECTED):
@@ -112,6 +112,7 @@ def main():
 
 
 def receive(sock, src_ip, src_port):
+
     pd = PacketData()
     sock.bind((src_ip, src_port))
 
@@ -132,45 +133,47 @@ def receive(sock, src_ip, src_port):
         
     #     print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
 
-def handshake(sock):
+def handshake(sock, peer_ip, peer_port):
+    global G_state
+    print("0")
     pd = PacketData()
-    seq = random.randint(0, 10000)
+    my_seq = random.randint(0, 10000)
     peer_seq = None
 
+    syn_sent = False
+    syn_ack_sent = False
+
     while True:
+        sock.sendto(pd.createPacket('', 0, my_seq, 0, 0, 1), (peer_ip, peer_port))
+        syn_sent = True
         try:
             packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
-            parsed = pd.parsePacket(packet)
             #handle_packet(parsed)
         except queue.Empty:
             print("No reply to SYN...")
             continue
-    # Step 1: Send SYN
-    sock.sendto(createPacket(b'', ack_num=0, seq_num=my_seq, window_size=0, syn=1), )
 
-    while True:
-        packet = receive_packet()
-        ack_num, seq_num, ack, syn, fin, ctr, win, checksum, data = parsePacket(packet)
+        ack_num = packet[0]
+        seq_num = packet[1]
+        ack = packet[2]
+        syn = packet[3]
+        fin = packet[4]
 
-        if state == "INIT" and syn and ack:
-            # Step 2: Received SYN+ACK
-            their_seq = seq_num
-            state = "HANDSHAKE_ACK"
-            send_packet(createPacket(b'', ack_num=their_seq + 1, seq_num=my_seq + 1, window_size=0, ack=1))
-            state = "ESTABLISHED"
-            print("Connection established")
+        if syn_sent and syn and ack:
+            my_seq += 1
+            sock.sendto(pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, window_size=0, ack=1), (peer_ip, peer_port)) #TODO replace with send function
+            print("Connected")
+            G_state = State.CONNECTED
+            break
 
-        elif state == "INIT" and syn:
-            # Step 1 (mirror): they initiated handshake
-            their_seq = seq_num
-            my_seq = random.randint(0, 10000)
-            (createPacket(b'', ack_num=their_seq + 1, seq_num=my_seq, window_size=0, syn=1, ack=1))
-            state = "WAIT_ACK"
+        elif syn:
+            sock.sendto(pd.createPacket('', 0, my_seq, 0, 1, 1), (peer_ip, peer_port))
+            syn_ack_sent = True
 
-        elif state == "WAIT_ACK" and ack:
-            # Step 3: they responded with final ACK
-            state = "ESTABLISHED"
-            print("Connection established")
+        elif syn_ack_sent and ack:
+            print("Connected")
+            G_state = State.CONNECTED
+            break
 
 
 def handleInput(sock, peer_ip, peer_port):
