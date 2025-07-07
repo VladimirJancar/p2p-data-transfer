@@ -5,6 +5,10 @@ import struct
 import threading
 from enum import Enum
 
+#!DEBUG
+import argparse
+#!DEBUG
+
 class State(Enum):
     INPUT = 0
     HANDSHAKE = 1
@@ -91,11 +95,22 @@ class PacketData():
 
 
 def main():
+    #!DEBUG 
+    parser = argparse.ArgumentParser(description="P2P Communicator")
+    parser.add_argument('--selfport', type=int, required=True, help="Port number to use")
+    parser.add_argument('--peerport', type=int, required=True, help="Port number of peer")
+    args = parser.parse_args()
+
+    src_port = args.selfport
+    peer_port = args.peerport
+    #!DEBUG
+
+
     global G_state
     src_ip = PEER_IP
     peer_ip = PEER_IP #input("[INPUT] peer IP address: ").strip()
-    src_port = PORT #int(input("[INPUT] listening port: ").strip())
-    peer_port =  PEER_PORT #int(input("[INPUT] peer port: ").strip())
+    #!src_port = PORT #int(input("[INPUT] listening port: ").strip())
+    #!peer_port =  PEER_PORT #int(input("[INPUT] peer port: ").strip())
 
     #TODO separate
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -109,6 +124,7 @@ def main():
     while True:
         if (G_state == State.CONNECTED):
             handleInput(sock, peer_ip, peer_port)
+            printTextMessages()
 
 
 def receive(sock, src_ip, src_port):
@@ -196,6 +212,11 @@ def handleInput(sock, peer_ip, peer_port):
     packet = pd.createPacket(user_input, 0, 0, 0)
     sock.sendto(packet, (peer_ip, peer_port))
 
+def printTextMessages(bytes):
+    packet, addr = sock.recvfrom(BUFFER_SIZE)
+    #     bytes = pd.parsePacket(packet)
+        
+    #     print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
 
 # def sendText(self, message):
 #         self.message_seq_num = self.message_seq_num + 1

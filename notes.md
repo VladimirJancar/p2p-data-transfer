@@ -11,6 +11,9 @@ handshake -> establish connection -> new Connection()
 THREADS:
 - always listening on a separate thread but ignores if not in receiving state
 
+MESSAGES
+- fin means end of fragmented message or the message is not fragmented (we wait for fin packet )
+
 FILE TRANSFER
 
 
