@@ -15,6 +15,7 @@ class State(Enum):
     CONNECTED = 2
     EXITING = 10
 
+#!DEBUG
 # PORT = 8880;PEER_PORT = 8888
 # PORT = 8888;PEER_PORT = 8880
 PEER_IP = "127.0.0.1"
@@ -25,7 +26,7 @@ MAX_FRAGMENT_SIZE = 1400
 G_state = State.INPUT
 packet_queue = queue.Queue()
 handshake_queue = queue.Queue()
-
+#!DEBUG
 
 class Communication():
     fragment_size = MAX_FRAGMENT_SIZE
@@ -45,7 +46,7 @@ class PacketData():
     def __init__(self):
         pass
 
-    def createPacket(self, data, ack_num: int, seq_num: int, window_size: int, ack=0, syn=0, fin=0, ctr=0) -> bytes:
+    def createPacket(self, data, ack_num: int, seq_num: int, ack=0, syn=0, fin=0, ctr=0) -> bytes:
         flags = (ack << 7) | (syn << 6) | (fin << 5) | (ctr << 4) #!| (self.sfs << 3) | (self.lfg << 2) | (self.ftr << 1)
         checksum = 0 #self.calculateChecksum(data.encode('utf-8'))
 
@@ -54,20 +55,19 @@ class PacketData():
         #     CORRUPT = False
 
         header = struct.pack(
-            '!IIBHH',#! SIZE
+            '!IIBH',#! SIZE
             ack_num,          # 32b
             seq_num,          # 32b
             flags,            # 8b
-            window_size,      # 16b
             checksum,         # 16b
         )
         #TODO checksum header+payload 
         return header + data.encode('utf-8')
 
     def parsePacket(self, packet: bytes):
-        header = packet[:13]
-        ack_num, seq_num, flags, window_size, checksum = struct.unpack('!IIBHH', header)
-        data = packet[13:].decode('utf-8') #! 13:
+        header = packet[:11]
+        ack_num, seq_num, flags, checksum = struct.unpack('!IIBH', header)
+        data = packet[11:].decode('utf-8') #! 11:
         ack=(flags >> 7) & 1
         syn=(flags >> 6) & 1
         fin=(flags >> 5) & 1
@@ -76,7 +76,7 @@ class PacketData():
         # lfg=(flags >> 2) & 1
         # ftr=(flags >> 1) & 1
 
-        return (ack_num, seq_num, ack, syn, fin, ctr, window_size, checksum, data)
+        return (ack_num, seq_num, ack, syn, fin, ctr, checksum, data)
     
     def calculateChecksum(self, data: bytes):
         polynomial = 0x8005
@@ -149,7 +149,6 @@ def handshake(sock, peer_ip, peer_port):
     global G_state
     pd = PacketData()
     my_seq = random.randint(0, 10000)
-    peer_seq = None
 
     syn_sent = False
     syn_ack_sent = False
@@ -157,7 +156,7 @@ def handshake(sock, peer_ip, peer_port):
     print("[HANDSHAKE]: Starting...")
 
     while True:
-        sock.sendto(pd.createPacket('', 0, my_seq, 0, 0, 1), (peer_ip, peer_port))
+        sock.sendto(pd.createPacket('', 0, my_seq, 0, 1), (peer_ip, peer_port))
         print("[HANDSHAKE]: SYN packet sent...")
         syn_sent = True
         try:
@@ -167,17 +166,17 @@ def handshake(sock, peer_ip, peer_port):
             print("[HANDSHAKE]: No reply to SYN packet...")
             continue
 
+        #TODO ack numbering
         ack_num = packet[0]
         seq_num = packet[1]
         ack = packet[2]
         syn = packet[3]
-        fin = packet[4]
 
         if syn_sent and syn and ack:
             my_seq += 1
             print("[HANDSHAKE]: SYN-ACK packet received...")
             print("[HANDSHAKE]: Sending ACK packet...")
-            sock.sendto(pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, window_size=0, ack=1), (peer_ip, peer_port)) #TODO replace with send function
+            sock.sendto(pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, ack=1), (peer_ip, peer_port)) #TODO replace with send function
             print("[HANDSHAKE]: Connected.")
             G_state = State.CONNECTED
             break
@@ -185,7 +184,7 @@ def handshake(sock, peer_ip, peer_port):
         elif syn:
             print("[HANDSHAKE]: SYN packet received...")
             print("[HANDSHAKE]: Sending SYN-ACK packet...")
-            sock.sendto(pd.createPacket('', 0, my_seq, 0, 1, 1), (peer_ip, peer_port))
+            sock.sendto(pd.createPacket('', 0, my_seq, 1, 1), (peer_ip, peer_port))
             syn_ack_sent = True
 
         elif syn_ack_sent and ack:
@@ -213,11 +212,11 @@ def handleInput(sock, peer_ip, peer_port):
     #     self.trerminateConnection()
     # else:
     pd = PacketData()
-    packet = pd.createPacket(user_input, 0, 0, 0)
+    packet = pd.createPacket(user_input, 0, 0)
     sock.sendto(packet, (peer_ip, peer_port))
 
 def printTextMessages(addr, bytes):
-    print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
+    print(f"{addr[0]}:{addr[1]} >> {bytes[7]}")
 
 
 if __name__ == "__main__":
