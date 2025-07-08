@@ -13,9 +13,10 @@ class State(Enum):
     INPUT = 0
     HANDSHAKE = 1
     CONNECTED = 2
+    EXITING = 10
 
 # PORT = 8880;PEER_PORT = 8888
-PORT = 8888;PEER_PORT = 8880
+# PORT = 8888;PEER_PORT = 8880
 PEER_IP = "127.0.0.1"
 
 BUFFER_SIZE = 2048
@@ -117,41 +118,35 @@ def main():
     threading.Thread(target=receive, args=(sock, src_ip, src_port), daemon=True).start()
 
     G_state = State.HANDSHAKE
-    #TODO 
-    print("starting handshake")
     handshake(sock, peer_ip, peer_port)
     
     while True:
         if (G_state == State.CONNECTED):
             handleInput(sock, peer_ip, peer_port)
-            printTextMessages()
 
 
 def receive(sock, src_ip, src_port):
+    global G_state
 
     pd = PacketData()
     sock.bind((src_ip, src_port))
 
-    while True:
+    while G_state != State.EXITING:
         try:
             packet, addr = sock.recvfrom(BUFFER_SIZE)
             bytes = pd.parsePacket(packet)
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
             else:
-                packet_queue.put(bytes)
+                #packet_queue.put(bytes)
+                printTextMessages(addr, bytes)
         except Exception as e:
-            print("Receiver error:", e)
+            #print("Receiver error:", e)
+            pass
 
-    # while True:
-    #     packet, addr = sock.recvfrom(BUFFER_SIZE)
-    #     bytes = pd.parsePacket(packet)
-        
-    #     print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
 
 def handshake(sock, peer_ip, peer_port):
     global G_state
-    print("0")
     pd = PacketData()
     my_seq = random.randint(0, 10000)
     peer_seq = None
@@ -159,14 +154,17 @@ def handshake(sock, peer_ip, peer_port):
     syn_sent = False
     syn_ack_sent = False
 
+    print("[HANDSHAKE]: Starting...")
+
     while True:
         sock.sendto(pd.createPacket('', 0, my_seq, 0, 0, 1), (peer_ip, peer_port))
+        print("[HANDSHAKE]: SYN packet sent...")
         syn_sent = True
         try:
             packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
             #handle_packet(parsed)
         except queue.Empty:
-            print("No reply to SYN...")
+            print("[HANDSHAKE]: No reply to SYN packet...")
             continue
 
         ack_num = packet[0]
@@ -177,23 +175,29 @@ def handshake(sock, peer_ip, peer_port):
 
         if syn_sent and syn and ack:
             my_seq += 1
+            print("[HANDSHAKE]: SYN-ACK packet received...")
+            print("[HANDSHAKE]: Sending ACK packet...")
             sock.sendto(pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, window_size=0, ack=1), (peer_ip, peer_port)) #TODO replace with send function
-            print("Connected")
+            print("[HANDSHAKE]: Connected.")
             G_state = State.CONNECTED
             break
 
         elif syn:
+            print("[HANDSHAKE]: SYN packet received...")
+            print("[HANDSHAKE]: Sending SYN-ACK packet...")
             sock.sendto(pd.createPacket('', 0, my_seq, 0, 1, 1), (peer_ip, peer_port))
             syn_ack_sent = True
 
         elif syn_ack_sent and ack:
-            print("Connected")
+            print("[HANDSHAKE]: SYN-ACK packet received...")
+            print("[HANDSHAKE]: Connected.")
             G_state = State.CONNECTED
             break
+    print()
 
 
 def handleInput(sock, peer_ip, peer_port):
-    user_input = input("\n")
+    user_input = input()
 
     #TODO
     # if user_input.startswith("/setfragsize "):
@@ -212,12 +216,18 @@ def handleInput(sock, peer_ip, peer_port):
     packet = pd.createPacket(user_input, 0, 0, 0)
     sock.sendto(packet, (peer_ip, peer_port))
 
-def printTextMessages(bytes):
-    packet, addr = sock.recvfrom(BUFFER_SIZE)
-    #     bytes = pd.parsePacket(packet)
-        
-    #     print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
+def printTextMessages(addr, bytes):
+    print(f"{addr[0]}:{addr[1]} >> {bytes[8]}")
 
+
+if __name__ == "__main__":
+    main()
+    
+
+
+
+
+    
 # def sendText(self, message):
 #         self.message_seq_num = self.message_seq_num + 1
 #         if self.message_seq_num == 0: 
@@ -242,7 +252,3 @@ def printTextMessages(bytes):
 #             self.socket.sendto(packet.toBytes(), (self.dest_ip, self.dest_port))
 #             self.message_seq_num += 1
 
-
-if __name__ == "__main__":
-    main()
-    
