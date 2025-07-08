@@ -28,18 +28,6 @@ packet_queue = queue.Queue()
 handshake_queue = queue.Queue()
 #!DEBUG
 
-class Communication():
-    fragment_size = MAX_FRAGMENT_SIZE
-
-    def __init__(self):
-        pass
-
-    def end():
-        pass
-
-    def heartbeat():
-        pass
-        
 
 class PacketData():
 
@@ -95,6 +83,85 @@ class PacketData():
         return crc
 
 
+class Connection():
+    fragment_size = MAX_FRAGMENT_SIZE
+
+    sock = None
+    src_ip = None
+    src_port = None
+    peer_ip = None 
+    peer_port = None
+
+    pd = PacketData()
+
+    def __init__(self, src_ip, src_port, peer_ip, peer_port):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.src_ip = src_ip
+        self.src_port = src_port
+        self.peer_ip = peer_ip
+        self.peer_port = peer_port
+
+        threading.Thread(target=receive, args=(self.sock, src_ip, src_port), daemon=True).start()
+
+    def handshake(self):
+        global G_state
+        my_seq = random.randint(0, 10000)
+
+        syn_sent = False
+        syn_ack_sent = False
+
+        print("[HANDSHAKE]: Starting...")
+
+        while True:
+            self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
+            print("[HANDSHAKE]: SYN packet sent...")
+            syn_sent = True
+            try:
+                packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
+                #handle_packet(parsed)
+            except queue.Empty:
+                print("[HANDSHAKE]: No reply to SYN packet...")
+                continue
+
+            #TODO ack numbering
+            ack_num = packet[0]
+            seq_num = packet[1]
+            ack = packet[2]
+            syn = packet[3]
+
+            if syn_sent and syn and ack:
+                my_seq += 1
+                print("[HANDSHAKE]: SYN-ACK packet received...")
+                print("[HANDSHAKE]: Sending ACK packet...")
+                self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, ack=1))
+                print("[HANDSHAKE]: Connected.")
+                G_state = State.CONNECTED
+                break
+
+            elif syn:
+                print("[HANDSHAKE]: SYN packet received...")
+                print("[HANDSHAKE]: Sending SYN-ACK packet...")
+                self.sendPacket(self.pd.createPacket('', 0, my_seq, 1, 1))
+                syn_ack_sent = True
+
+            elif syn_ack_sent and ack:
+                print("[HANDSHAKE]: SYN-ACK packet received...")
+                print("[HANDSHAKE]: Connected.")
+                G_state = State.CONNECTED
+                break
+        print()
+
+    def sendPacket(self, packet: bytes):
+        self.sock.sendto(packet, (self.peer_ip, self.peer_port))
+        #TODO fragmentation and ack storage
+
+    def end(self):
+        pass
+
+    def heartbeat(self):
+        pass
+        
+
 def main():
     #!DEBUG 
     parser = argparse.ArgumentParser(description="P2P Communicator")
@@ -113,16 +180,14 @@ def main():
     #!src_port = PORT #int(input("[INPUT] listening port: ").strip())
     #!peer_port =  PEER_PORT #int(input("[INPUT] peer port: ").strip())
 
-    #TODO separate
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    threading.Thread(target=receive, args=(sock, src_ip, src_port), daemon=True).start()
+    connection = Connection(src_ip, src_port, peer_ip, peer_port)
 
     G_state = State.HANDSHAKE
-    handshake(sock, peer_ip, peer_port)
+    connection.handshake()
     
     while True:
         if (G_state == State.CONNECTED):
-            handleInput(sock, peer_ip, peer_port)
+            handleInput(connection.sock, peer_ip, peer_port)
 
 
 def receive(sock, src_ip, src_port):
@@ -143,56 +208,6 @@ def receive(sock, src_ip, src_port):
         except Exception as e:
             #print("Receiver error:", e)
             pass
-
-
-def handshake(sock, peer_ip, peer_port):
-    global G_state
-    pd = PacketData()
-    my_seq = random.randint(0, 10000)
-
-    syn_sent = False
-    syn_ack_sent = False
-
-    print("[HANDSHAKE]: Starting...")
-
-    while True:
-        sock.sendto(pd.createPacket('', 0, my_seq, 0, 1), (peer_ip, peer_port))
-        print("[HANDSHAKE]: SYN packet sent...")
-        syn_sent = True
-        try:
-            packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
-            #handle_packet(parsed)
-        except queue.Empty:
-            print("[HANDSHAKE]: No reply to SYN packet...")
-            continue
-
-        #TODO ack numbering
-        ack_num = packet[0]
-        seq_num = packet[1]
-        ack = packet[2]
-        syn = packet[3]
-
-        if syn_sent and syn and ack:
-            my_seq += 1
-            print("[HANDSHAKE]: SYN-ACK packet received...")
-            print("[HANDSHAKE]: Sending ACK packet...")
-            sock.sendto(pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, ack=1), (peer_ip, peer_port)) #TODO replace with send function
-            print("[HANDSHAKE]: Connected.")
-            G_state = State.CONNECTED
-            break
-
-        elif syn:
-            print("[HANDSHAKE]: SYN packet received...")
-            print("[HANDSHAKE]: Sending SYN-ACK packet...")
-            sock.sendto(pd.createPacket('', 0, my_seq, 1, 1), (peer_ip, peer_port))
-            syn_ack_sent = True
-
-        elif syn_ack_sent and ack:
-            print("[HANDSHAKE]: SYN-ACK packet received...")
-            print("[HANDSHAKE]: Connected.")
-            G_state = State.CONNECTED
-            break
-    print()
 
 
 def handleInput(sock, peer_ip, peer_port):
