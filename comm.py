@@ -1,3 +1,4 @@
+from datetime import datetime
 import queue
 import random
 import socket
@@ -7,6 +8,7 @@ from enum import Enum
 
 #!DEBUG
 import argparse
+import time
 #!DEBUG
 
 class State(Enum):
@@ -110,17 +112,17 @@ class Connection():
         syn_sent = False
         syn_ack_sent = False
 
-        print("[HANDSHAKE]: Starting...")
+        printHandshakeInfo("Starting...")
 
         while True:
             self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
-            print("[HANDSHAKE]: SYN packet sent...")
+            printHandshakeInfo("SYN packet sent...")
             syn_sent = True
             try:
                 packet = handshake_queue.get(timeout=5)  # Blocks until packet arrives
                 #handle_packet(parsed)
             except queue.Empty:
-                print("[HANDSHAKE]: No reply to SYN packet...")
+                printHandshakeInfo("No reply to SYN packet...")
                 continue
 
             #TODO ack numbering
@@ -131,22 +133,22 @@ class Connection():
 
             if syn_sent and syn and ack:
                 my_seq += 1
-                print("[HANDSHAKE]: SYN-ACK packet received...")
-                print("[HANDSHAKE]: Sending ACK packet...")
+                printHandshakeInfo("SYN-ACK packet received...")
+                printHandshakeInfo("Sending ACK packet...")
                 self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, ack=1))
-                print("[HANDSHAKE]: Connected.")
+                printHandshakeInfo("Connected.")
                 G_state = State.CONNECTED
                 break
 
             elif syn:
-                print("[HANDSHAKE]: SYN packet received...")
-                print("[HANDSHAKE]: Sending SYN-ACK packet...")
+                printHandshakeInfo("SYN packet received...")
+                printHandshakeInfo("Sending SYN-ACK packet...")
                 self.sendPacket(self.pd.createPacket('', 0, my_seq, 1, 1))
                 syn_ack_sent = True
 
             elif syn_ack_sent and ack:
-                print("[HANDSHAKE]: SYN-ACK packet received...")
-                print("[HANDSHAKE]: Connected.")
+                printHandshakeInfo("SYN-ACK packet received...")
+                printHandshakeInfo("Connected.")
                 G_state = State.CONNECTED
                 break
         print()
@@ -231,8 +233,11 @@ def handleInput(sock, peer_ip, peer_port):
     sock.sendto(packet, (peer_ip, peer_port))
 
 def printTextMessages(addr, bytes):
-    print(f"{addr[0]}:{addr[1]} >> {bytes[7]}")
+    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[7]}") #TODO ADD TIME
 
+
+def printHandshakeInfo(message):
+    print(f"({datetime.now().strftime("%H:%M")}) [HANDSHAKE]: {message}")
 
 if __name__ == "__main__":
     main()
