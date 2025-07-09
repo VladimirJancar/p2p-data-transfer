@@ -27,6 +27,7 @@ BUFFER_SIZE = 2048
 MAX_FRAGMENT_SIZE = 1400
 
 G_state = State.INPUT
+#TODO text, file, handshake separate queue
 packet_queue = queue.Queue()
 handshake_queue = queue.Queue()
 
@@ -44,8 +45,8 @@ class PacketData():
     def __init__(self):
         pass
 
-    def createPacket(self, data, ack_num: int, seq_num: int, ack=0, syn=0, fin=0, ctr=0) -> bytes:
-        flags = (ack << 7) | (syn << 6) | (fin << 5) | (ctr << 4) #!| (self.sfs << 3) | (self.lfg << 2) | (self.ftr << 1)
+    def createPacket(self, data, ack_num: int, seq_num: int, ack=0, syn=0, fin=0, ctr=0, ftr=0) -> bytes:
+        flags = (ack << 7) | (syn << 6) | (fin << 5) | (ctr << 4) | (ftr << 3) #!| (self.lfg << 2) | (self.ftr << 1)
         checksum = 0 #self.calculateChecksum(data.encode('utf-8'))
 
         # if (self.ftr==1 and self.seq_num==2 and CORRUPT):
@@ -70,11 +71,11 @@ class PacketData():
         syn=(flags >> 6) & 1
         fin=(flags >> 5) & 1
         ctr=(flags >> 4) & 1
-        # sfs=(flags >> 3) & 1
+        ftr=(flags >> 3) & 1
         # lfg=(flags >> 2) & 1
         # ftr=(flags >> 1) & 1
 
-        return (ack_num, seq_num, ack, syn, fin, ctr, checksum, data)
+        return (data, ack_num, seq_num, ack, syn, fin, ctr, ftr, None, None, None, checksum)
     
     def calculateChecksum(self, data: bytes):
         polynomial = 0x8005
@@ -115,6 +116,10 @@ class FileData():
         try:
             if os.path.exists(file_path):
                 G_state = State.FILE_TRANSFER
+
+                with packet_queue.mutex:
+                    packet_queue.queue.clear()
+
                 self.printFTInfo("Sending file '" + os.path.basename(file_path) + "'...")
                 self.sendBytes(file_path)
             else:
@@ -123,12 +128,12 @@ class FileData():
             self.printFTInfo("Error sending file: " + e) 
 
     def sendBytes(self, file_path):
-        try:
+        try: #TODO need this?
             file_name = os.path.basename(file_path)
             with open(file_path, 'rb') as file:
-                data = file.read()
-                fragments = self.protocol.fragmentData(data.decode('latin1'))
-                self.total_fragments = len(fragments)
+                # data = file.read()
+                # fragments = self.protocol.fragmentData(data.decode('latin1'))
+                # self.total_fragments = len(fragments)
 
                 #TODO LATER seek window within the file
                 # with open(file_path, "rb") as f:
@@ -138,22 +143,25 @@ class FileData():
                 # Send setup packet with total_fragments and filename
 
                 while True:
-                    self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
-                    printHandshakeInfo("SYN packet sent...")
-                    syn_sent = True
+                    self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1))
+                    self.printFTInfo("File transfer initialization packet sent...")
                     try:
-                        packet = packet_queue.get(timeout=5)  # Blocks until packet arrives
+                        packet = packet_queue.get(timeout=1)  # Blocks until ACK packet arrives
+                        self.printFTInfo("filename: " + packet[0])
+                        break
                         #handle_packet(parsed)
                     except queue.Empty:
-                        printHandshakeInfo("No reply to SYN packet...")
+                        self.printFTInfo("No reply to init packet...")
                         continue
-                setup_packet = Packet(
-                    seq_num=self.file_seq_num,
-                    ftr=1,
-                    ctr=1,
-                    data=f"{self.total_fragments:08x}|{filename}"
-                )
-                peer.sendPacket(dest_ip, dest_port, setup_packet)
+
+                print("RECEIVED ACK PACKET FOR" + file_path)
+                # setup_packet = Packet(
+                #     seq_num=self.file_seq_num,
+                #     ftr=1,
+                #     ctr=1,
+                #     data=f"{self.total_fragments:08x}|{filename}"
+                # )
+                # peer.sendPacket(dest_ip, dest_port, setup_packet)
 
                 # Start sending and receiving threads #TODO
                 # send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
@@ -169,21 +177,21 @@ class FileData():
             self.printFTInfo("Error sending file: " + e)
 
 
-    def reconstructFile(self):
-        global FILE_TRANSFERING
-        save_path = input("Enter path to save the file << ")
-        if not os.path.exists(save_path):
-            print("Path does not exist, saving to default download directory...")
-            save_path = ""
-        elif save_path[-1:] not in ['\\', '/']:
-            save_path += '\\'
+    # def reconstructFile(self):
+    #     global FILE_TRANSFERING
+    #     save_path = input("Enter path to save the file << ")
+    #     if not os.path.exists(save_path):
+    #         print("Path does not exist, saving to default download directory...")
+    #         save_path = ""
+    #     elif save_path[-1:] not in ['\\', '/']:
+    #         save_path += '\\'
 
-        save_path += self.current_filename
-        with open(save_path, 'wb') as f:
-            for seq_num in sorted(self.file_fragments.keys()):
-                f.write(self.file_fragments[seq_num].encode('latin1'))
-        print(f"File successfully received and saved as \"{save_path}\".")
-        FILE_TRANSFERING = False
+    #     save_path += self.current_filename
+    #     with open(save_path, 'wb') as f:
+    #         for seq_num in sorted(self.file_fragments.keys()):
+    #             f.write(self.file_fragments[seq_num].encode('latin1'))
+    #     print(f"File successfully received and saved as \"{save_path}\".")
+    #     FILE_TRANSFERING = False
 
     def printFTInfo(self, message):
         print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: {message}")
@@ -223,6 +231,9 @@ class Connection():
 
         printHandshakeInfo("Starting...")
 
+        with handshake_queue.mutex:
+            handshake_queue.queue.clear()
+
         while True:
             self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
             printHandshakeInfo("SYN packet sent...")
@@ -235,10 +246,10 @@ class Connection():
                 continue
 
             #TODO ack numbering
-            ack_num = packet[0]
-            seq_num = packet[1]
-            ack = packet[2]
-            syn = packet[3]
+            ack_num = packet[1]
+            seq_num = packet[2]
+            ack = packet[3]
+            syn = packet[4]
 
             if syn_sent and syn and ack:
                 my_seq += 1
@@ -272,6 +283,7 @@ class Connection():
         #         self.setFragmentSize(new_size)
         #     except ValueError:
         #         print("Invalid command. Usage: /setfragsize <size>")
+        #TODO if message startsWith / and is incorrect commant send warning instead of message
         if user_input.startswith("/send "):
             file_path = user_input[6:].strip()
             self.fd.sendFile(file_path)
@@ -318,8 +330,10 @@ def main():
     
     while True:
         if (G_state == State.CONNECTED):
-            connection.handleInput(connection.sock, peer_ip, peer_port)
-        if (G_state == State.FILE_TRANSFER)
+            connection.handleInput()
+        if (G_state == State.FILE_TRANSFER):
+            connection.sendPacket(connection.pd.createPacket('', ack_num=0, seq_num=0, ack=1))
+
 
 
 def receive(sock, src_ip, src_port):
@@ -334,8 +348,11 @@ def receive(sock, src_ip, src_port):
             bytes = pd.parsePacket(packet)
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
+            elif bytes[6] and bytes[7]: # ftr && ctr
+                G_state = State.FILE_TRANSFER
+            elif bytes[3]:
+                packet_queue.put(bytes)
             else:
-                #packet_queue.put(bytes)
                 printTextMessages(addr, bytes)
         except Exception as e:
             #print("Receiver error:", e)
@@ -343,7 +360,7 @@ def receive(sock, src_ip, src_port):
 
 
 def printTextMessages(addr, bytes):
-    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[7]}")
+    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[0]}")
 
 
 def printHandshakeInfo(message):
@@ -383,52 +400,52 @@ if __name__ == "__main__":
 #             self.message_seq_num += 1
 
 
-    def handleFragment(self, packet):
-        global FILE_TRANSFERING
-        crc = Packet.calculateChecksum
+    # def handleFragment(self, packet):
+    #     global FILE_TRANSFERING
+    #     crc = Packet.calculateChecksum
 
-        if packet.ftr != 1:
-            return
+    #     if packet.ftr != 1:
+    #         return
 
-        if packet.ack == 1:  # Filename packet
-            try:
-                total_fragments_hex, filename = packet.data.split('|', 1)
-                self.expected_fragments = int(total_fragments_hex, 16)
-                self.current_filename = filename
-                print(f"Receiving file: {filename} ({self.expected_fragments} fragments expected)")
-            except ValueError:
-                print("Error parsing header packet.")
-            return
+    #     if packet.ack == 1:  # Filename packet
+    #         try:
+    #             total_fragments_hex, filename = packet.data.split('|', 1)
+    #             self.expected_fragments = int(total_fragments_hex, 16)
+    #             self.current_filename = filename
+    #             print(f"Receiving file: {filename} ({self.expected_fragments} fragments expected)")
+    #         except ValueError:
+    #             print("Error parsing header packet.")
+    #         return
 
-        if (packet.checksum == crc(packet.data.encode('utf-8'))):
-            seq_num = packet.seq_num
-            self.file_fragments[seq_num] = packet.data
+    #     if (packet.checksum == crc(packet.data.encode('utf-8'))):
+    #         seq_num = packet.seq_num
+    #         self.file_fragments[seq_num] = packet.data
             
-            ack_packet = Packet(
-                ack=1,
-                ack_num=seq_num
-            )
-            peer.sendPacket(peer.dest_ip, peer.dest_port, ack_packet)
+    #         ack_packet = Packet(
+    #             ack=1,
+    #             ack_num=seq_num
+    #         )
+    #         peer.sendPacket(peer.dest_ip, peer.dest_port, ack_packet)
 
-            self.acknowledged_frags += 1
-            self.last_acked_seq = seq_num
+    #         self.acknowledged_frags += 1
+    #         self.last_acked_seq = seq_num
 
-            # Progress
-            print(f"\rFragments > {len(self.file_fragments)}/{self.expected_fragments} received, {self.acknowledged_frags}/{self.expected_fragments} acknowledged", end="", flush=True)                
+    #         # Progress
+    #         print(f"\rFragments > {len(self.file_fragments)}/{self.expected_fragments} received, {self.acknowledged_frags}/{self.expected_fragments} acknowledged", end="", flush=True)                
 
-            # Check if file transfer is complete
-            if len(self.file_fragments) == self.expected_fragments:
-                self.reconstructFile()
-                self.file_complete = True
-                FILE_TRANSFERING = False
+    #         # Check if file transfer is complete
+    #         if len(self.file_fragments) == self.expected_fragments:
+    #             self.reconstructFile()
+    #             self.file_complete = True
+    #             FILE_TRANSFERING = False
 
-        elif (packet.ftr == 1):
-            print(f"\nInvalid checksum for packet {packet.seq_num}")
-            err_packet = Packet(
-                err=1,
-                ack_num=packet.seq_num
-            )
-            peer.sendPacket(peer.dest_ip, peer.dest_port, err_packet)
+    #     elif (packet.ftr == 1):
+    #         print(f"\nInvalid checksum for packet {packet.seq_num}")
+    #         err_packet = Packet(
+    #             err=1,
+    #             ack_num=packet.seq_num
+    #         )
+    #         peer.sendPacket(peer.dest_ip, peer.dest_port, err_packet)
                 
     
 
