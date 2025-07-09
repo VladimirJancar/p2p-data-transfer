@@ -19,6 +19,7 @@ MESSAGES
 - fin means end of fragmented message or the message is not fragmented (we wait for fin packet )
 
 FILE TRANSFER
+- send a CTR packet with filename and length and wain for ACK before proceeding
 
 
 PROTOCOL:

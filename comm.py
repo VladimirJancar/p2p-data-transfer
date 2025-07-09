@@ -99,13 +99,15 @@ class FileData():
     peer_port = None
     fragment_size = None
     connection = None
+    pd = None
 
-    def __init__(self, sock, peer_ip, peer_port, fragment_size, connection):
+    def __init__(self, sock, peer_ip, peer_port, fragment_size, connection, packet_data):
         self.sock = sock
         self.peer_ip = peer_ip
         self.peer_port = peer_port
         self.fragment_size = fragment_size
         self.connection = connection
+        self.pd = packet_data
 
     def sendFile(self, file_path):
         global G_state
@@ -113,12 +115,12 @@ class FileData():
         try:
             if os.path.exists(file_path):
                 G_state = State.FILE_TRANSFER
-                print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Sending file '{os.path.basename(file_path)}'...")
-                self.FileData.transfer(file_path)
+                self.printFTInfo("Sending file '" + os.path.basename(file_path) + "'...")
+                self.sendBytes(file_path)
             else:
-                print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: File not found.")
+                self.printFTInfo("File not found.")
         except Exception as e:
-            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Error sending file: {e}") 
+            self.printFTInfo("Error sending file: " + e) 
 
     def sendBytes(self, file_path):
         try:
@@ -134,6 +136,17 @@ class FileData():
                 # data = f.read(FRAGMENT_SIZE)
 
                 # Send setup packet with total_fragments and filename
+
+                while True:
+                    self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
+                    printHandshakeInfo("SYN packet sent...")
+                    syn_sent = True
+                    try:
+                        packet = packet_queue.get(timeout=5)  # Blocks until packet arrives
+                        #handle_packet(parsed)
+                    except queue.Empty:
+                        printHandshakeInfo("No reply to SYN packet...")
+                        continue
                 setup_packet = Packet(
                     seq_num=self.file_seq_num,
                     ftr=1,
@@ -151,11 +164,29 @@ class FileData():
                  
                 
         except FileNotFoundError:
-            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: File not found.")
+            self.printFTInfo("File not found.")
         except Exception as e:
-            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Error sending file: {e}")
+            self.printFTInfo("Error sending file: " + e)
 
-    
+
+    def reconstructFile(self):
+        global FILE_TRANSFERING
+        save_path = input("Enter path to save the file << ")
+        if not os.path.exists(save_path):
+            print("Path does not exist, saving to default download directory...")
+            save_path = ""
+        elif save_path[-1:] not in ['\\', '/']:
+            save_path += '\\'
+
+        save_path += self.current_filename
+        with open(save_path, 'wb') as f:
+            for seq_num in sorted(self.file_fragments.keys()):
+                f.write(self.file_fragments[seq_num].encode('latin1'))
+        print(f"File successfully received and saved as \"{save_path}\".")
+        FILE_TRANSFERING = False
+
+    def printFTInfo(self, message):
+        print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: {message}")
 
     
 
@@ -179,7 +210,7 @@ class Connection():
         self.peer_port = peer_port
 
         self.pd = PacketData()
-        self.fd = FileData(self.sock, self.peer_ip, self.peer_port, self.fragment_size, self)
+        self.fd = FileData(self.sock, self.peer_ip, self.peer_port, self.fragment_size, self, self.pd)
 
         threading.Thread(target=receive, args=(self.sock, src_ip, src_port), daemon=True).start()
 
@@ -312,7 +343,7 @@ def receive(sock, src_ip, src_port):
 
 
 def printTextMessages(addr, bytes):
-    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[7]}") #TODO ADD TIME
+    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[7]}")
 
 
 def printHandshakeInfo(message):
@@ -350,38 +381,6 @@ if __name__ == "__main__":
 #             packet = Packet(seq_num=self.message_seq_num, data=message)
 #             self.socket.sendto(packet.toBytes(), (self.dest_ip, self.dest_port))
 #             self.message_seq_num += 1
-
-
-def sendFile(self, peer, dest_ip, dest_port, file_path):
-        global FILE_TRANSFERING
-        try:
-            filename = os.path.basename(file_path)
-            with open(file_path, 'rb') as file:
-                data = file.read()
-                fragments = self.protocol.fragmentData(data.decode('latin1'))
-                self.total_fragments = len(fragments)
-
-                # Send setup packet with total_fragments and filename
-                setup_packet = Packet(
-                    seq_num=self.file_seq_num,
-                    ftr=1,
-                    ack=1,
-                    data=f"{self.total_fragments:08x}|{filename}"
-                )
-                peer.sendPacket(dest_ip, dest_port, setup_packet)
-
-                # Start sending and receiving threads
-                send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
-                ack_thread = threading.Thread(target=self.receiveAcks, args=())
-
-                send_thread.start()
-                ack_thread.start()
-                 
-                
-        except FileNotFoundError:
-            print("Error: File not found.")
-        except Exception as e:
-            print(f"Error sending file: {e}")
 
 
     def handleFragment(self, packet):
@@ -431,19 +430,5 @@ def sendFile(self, peer, dest_ip, dest_port, file_path):
             )
             peer.sendPacket(peer.dest_ip, peer.dest_port, err_packet)
                 
-    def reconstructFile(self):
-        global FILE_TRANSFERING
-        save_path = input("Enter path to save the file << ")
-        if not os.path.exists(save_path):
-            print("Path does not exist, saving to default download directory...")
-            save_path = ""
-        elif save_path[-1:] not in ['\\', '/']:
-            save_path += '\\'
-
-        save_path += self.current_filename
-        with open(save_path, 'wb') as f:
-            for seq_num in sorted(self.file_fragments.keys()):
-                f.write(self.file_fragments[seq_num].encode('latin1'))
-        print(f"File successfully received and saved as \"{save_path}\".")
-        FILE_TRANSFERING = False
+    
 
