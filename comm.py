@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 import queue
 import random
 import socket
@@ -8,31 +9,38 @@ from enum import Enum
 
 #!DEBUG
 import argparse
-import time
 #!DEBUG
 
 class State(Enum):
     INPUT = 0
     HANDSHAKE = 1
     CONNECTED = 2
+    FILE_TRANSFER = 3
     EXITING = 10
 
 #!DEBUG
 # PORT = 8880;PEER_PORT = 8888
 # PORT = 8888;PEER_PORT = 8880
 PEER_IP = "127.0.0.1"
-
+#!DEBUG
 BUFFER_SIZE = 2048
 MAX_FRAGMENT_SIZE = 1400
 
 G_state = State.INPUT
 packet_queue = queue.Queue()
 handshake_queue = queue.Queue()
-#!DEBUG
+
+#TODO packet storage
+# import numpy as np
+
+# packet_buffer = np.zeros(1000, dtype=np.uint8)  # 1000-byte buffer
+
+# acks = np.zeros(65536, dtype=bool)  # Track 64k packet ACKs
+# acks[packet_seq] = True
+
 
 
 class PacketData():
-
     def __init__(self):
         pass
 
@@ -85,8 +93,74 @@ class PacketData():
         return crc
 
 
+class FileData():
+    sock = None
+    peer_ip = None 
+    peer_port = None
+    fragment_size = None
+    connection = None
+
+    def __init__(self, sock, peer_ip, peer_port, fragment_size, connection):
+        self.sock = sock
+        self.peer_ip = peer_ip
+        self.peer_port = peer_port
+        self.fragment_size = fragment_size
+        self.connection = connection
+
+    def sendFile(self, file_path):
+        global G_state
+
+        try:
+            if os.path.exists(file_path):
+                G_state = State.FILE_TRANSFER
+                print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Sending file '{os.path.basename(file_path)}'...")
+                self.FileData.transfer(file_path)
+            else:
+                print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: File not found.")
+        except Exception as e:
+            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Error sending file: {e}") 
+
+    def sendBytes(self, file_path):
+        try:
+            file_name = os.path.basename(file_path)
+            with open(file_path, 'rb') as file:
+                data = file.read()
+                fragments = self.protocol.fragmentData(data.decode('latin1'))
+                self.total_fragments = len(fragments)
+
+                #TODO LATER seek window within the file
+                # with open(file_path, "rb") as f:
+                #     f.seek(packet_seq * FRAGMENT_SIZE)
+                # data = f.read(FRAGMENT_SIZE)
+
+                # Send setup packet with total_fragments and filename
+                setup_packet = Packet(
+                    seq_num=self.file_seq_num,
+                    ftr=1,
+                    ctr=1,
+                    data=f"{self.total_fragments:08x}|{filename}"
+                )
+                peer.sendPacket(dest_ip, dest_port, setup_packet)
+
+                # Start sending and receiving threads #TODO
+                # send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
+                # ack_thread = threading.Thread(target=self.receiveAcks, args=())
+
+                # send_thread.start()
+                # ack_thread.start()
+                 
+                
+        except FileNotFoundError:
+            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: File not found.")
+        except Exception as e:
+            print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: Error sending file: {e}")
+
+    
+
+    
+
 class Connection():
-    fragment_size = MAX_FRAGMENT_SIZE
+    fragment_size = MAX_FRAGMENT_SIZE #TODO update on change
 
     sock = None
     src_ip = None
@@ -94,7 +168,8 @@ class Connection():
     peer_ip = None 
     peer_port = None
 
-    pd = PacketData()
+    pd = None
+    fd = None #TODO update fd.fragment_size on change
 
     def __init__(self, src_ip, src_port, peer_ip, peer_port):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -103,11 +178,14 @@ class Connection():
         self.peer_ip = peer_ip
         self.peer_port = peer_port
 
+        self.pd = PacketData()
+        self.fd = FileData(self.sock, self.peer_ip, self.peer_port, self.fragment_size, self)
+
         threading.Thread(target=receive, args=(self.sock, src_ip, src_port), daemon=True).start()
 
     def handshake(self):
         global G_state
-        my_seq = random.randint(0, 10000)
+        my_seq = random.randint(0, 10000) #TODO
 
         syn_sent = False
         syn_ack_sent = False
@@ -153,6 +231,26 @@ class Connection():
                 break
         print()
 
+    def handleInput(self):
+        user_input = input()
+
+        #TODO
+        # if user_input.startswith("/setfragsize "):
+        #     try:
+        #         new_size = int(user_input.split()[1])
+        #         self.setFragmentSize(new_size)
+        #     except ValueError:
+        #         print("Invalid command. Usage: /setfragsize <size>")
+        if user_input.startswith("/send "):
+            file_path = user_input[6:].strip()
+            self.fd.sendFile(file_path)
+        # elif user_input.startswith("/disconnect"):
+        #     self.trerminateConnection()
+        else:
+            pd = PacketData()
+            packet = pd.createPacket(user_input, 0, 0)
+            self.sock.sendto(packet, (self.peer_ip, self.peer_port))
+
     def sendPacket(self, packet: bytes):
         self.sock.sendto(packet, (self.peer_ip, self.peer_port))
         #TODO fragmentation and ack storage
@@ -189,7 +287,8 @@ def main():
     
     while True:
         if (G_state == State.CONNECTED):
-            handleInput(connection.sock, peer_ip, peer_port)
+            connection.handleInput(connection.sock, peer_ip, peer_port)
+        if (G_state == State.FILE_TRANSFER)
 
 
 def receive(sock, src_ip, src_port):
@@ -212,32 +311,13 @@ def receive(sock, src_ip, src_port):
             pass
 
 
-def handleInput(sock, peer_ip, peer_port):
-    user_input = input()
-
-    #TODO
-    # if user_input.startswith("/setfragsize "):
-    #     try:
-    #         new_size = int(user_input.split()[1])
-    #         self.setFragmentSize(new_size)
-    #     except ValueError:
-    #         print("Invalid command. Usage: /setfragsize <size>")
-    # elif user_input.startswith("/send "):
-    #     file_path = user_input[6:].strip()
-    #     self.sendFile(file_path)
-    # elif user_input.startswith("/disconnect"):
-    #     self.trerminateConnection()
-    # else:
-    pd = PacketData()
-    packet = pd.createPacket(user_input, 0, 0)
-    sock.sendto(packet, (peer_ip, peer_port))
-
 def printTextMessages(addr, bytes):
     print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[7]}") #TODO ADD TIME
 
 
 def printHandshakeInfo(message):
     print(f"({datetime.now().strftime("%H:%M")}) [HANDSHAKE]: {message}")
+
 
 if __name__ == "__main__":
     main()
@@ -270,4 +350,100 @@ if __name__ == "__main__":
 #             packet = Packet(seq_num=self.message_seq_num, data=message)
 #             self.socket.sendto(packet.toBytes(), (self.dest_ip, self.dest_port))
 #             self.message_seq_num += 1
+
+
+def sendFile(self, peer, dest_ip, dest_port, file_path):
+        global FILE_TRANSFERING
+        try:
+            filename = os.path.basename(file_path)
+            with open(file_path, 'rb') as file:
+                data = file.read()
+                fragments = self.protocol.fragmentData(data.decode('latin1'))
+                self.total_fragments = len(fragments)
+
+                # Send setup packet with total_fragments and filename
+                setup_packet = Packet(
+                    seq_num=self.file_seq_num,
+                    ftr=1,
+                    ack=1,
+                    data=f"{self.total_fragments:08x}|{filename}"
+                )
+                peer.sendPacket(dest_ip, dest_port, setup_packet)
+
+                # Start sending and receiving threads
+                send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
+                ack_thread = threading.Thread(target=self.receiveAcks, args=())
+
+                send_thread.start()
+                ack_thread.start()
+                 
+                
+        except FileNotFoundError:
+            print("Error: File not found.")
+        except Exception as e:
+            print(f"Error sending file: {e}")
+
+
+    def handleFragment(self, packet):
+        global FILE_TRANSFERING
+        crc = Packet.calculateChecksum
+
+        if packet.ftr != 1:
+            return
+
+        if packet.ack == 1:  # Filename packet
+            try:
+                total_fragments_hex, filename = packet.data.split('|', 1)
+                self.expected_fragments = int(total_fragments_hex, 16)
+                self.current_filename = filename
+                print(f"Receiving file: {filename} ({self.expected_fragments} fragments expected)")
+            except ValueError:
+                print("Error parsing header packet.")
+            return
+
+        if (packet.checksum == crc(packet.data.encode('utf-8'))):
+            seq_num = packet.seq_num
+            self.file_fragments[seq_num] = packet.data
+            
+            ack_packet = Packet(
+                ack=1,
+                ack_num=seq_num
+            )
+            peer.sendPacket(peer.dest_ip, peer.dest_port, ack_packet)
+
+            self.acknowledged_frags += 1
+            self.last_acked_seq = seq_num
+
+            # Progress
+            print(f"\rFragments > {len(self.file_fragments)}/{self.expected_fragments} received, {self.acknowledged_frags}/{self.expected_fragments} acknowledged", end="", flush=True)                
+
+            # Check if file transfer is complete
+            if len(self.file_fragments) == self.expected_fragments:
+                self.reconstructFile()
+                self.file_complete = True
+                FILE_TRANSFERING = False
+
+        elif (packet.ftr == 1):
+            print(f"\nInvalid checksum for packet {packet.seq_num}")
+            err_packet = Packet(
+                err=1,
+                ack_num=packet.seq_num
+            )
+            peer.sendPacket(peer.dest_ip, peer.dest_port, err_packet)
+                
+    def reconstructFile(self):
+        global FILE_TRANSFERING
+        save_path = input("Enter path to save the file << ")
+        if not os.path.exists(save_path):
+            print("Path does not exist, saving to default download directory...")
+            save_path = ""
+        elif save_path[-1:] not in ['\\', '/']:
+            save_path += '\\'
+
+        save_path += self.current_filename
+        with open(save_path, 'wb') as f:
+            for seq_num in sorted(self.file_fragments.keys()):
+                f.write(self.file_fragments[seq_num].encode('latin1'))
+        print(f"File successfully received and saved as \"{save_path}\".")
+        FILE_TRANSFERING = False
 
