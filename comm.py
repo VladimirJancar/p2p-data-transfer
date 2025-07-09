@@ -45,8 +45,8 @@ class PacketData():
     def __init__(self):
         pass
 
-    def createPacket(self, data, ack_num: int, seq_num: int, ack=0, syn=0, fin=0, ctr=0, ftr=0) -> bytes:
-        flags = (ack << 7) | (syn << 6) | (fin << 5) | (ctr << 4) | (ftr << 3) #!| (self.lfg << 2) | (self.ftr << 1)
+    def createPacket(self, data, ack_num: int, seq_num: int, ack=0, syn=0, fin=0, ctr=0, ftr=0, nack=0) -> bytes:
+        flags = (ack << 7) | (syn << 6) | (fin << 5) | (ctr << 4) | (ftr << 3) | (nack << 2) #!| (self.ftr << 1)
         checksum = 0 #self.calculateChecksum(data.encode('utf-8'))
 
         # if (self.ftr==1 and self.seq_num==2 and CORRUPT):
@@ -72,10 +72,10 @@ class PacketData():
         fin=(flags >> 5) & 1
         ctr=(flags >> 4) & 1
         ftr=(flags >> 3) & 1
-        # lfg=(flags >> 2) & 1
+        nack=(flags >> 2) & 1
         # ftr=(flags >> 1) & 1
 
-        return (data, ack_num, seq_num, ack, syn, fin, ctr, ftr, None, None, None, checksum)
+        return (data, ack_num, seq_num, ack, syn, fin, ctr, ftr, nack, None, None, checksum)
     
     def calculateChecksum(self, data: bytes):
         polynomial = 0x8005
@@ -146,8 +146,14 @@ class FileData():
                     self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1))
                     self.printFTInfo("File transfer initialization packet sent...")
                     try:
-                        packet = packet_queue.get(timeout=1)  # Blocks until ACK packet arrives
-                        self.printFTInfo("filename: " + packet[0])
+                        bytes = packet_queue.get(timeout=3)  # Blocks until ACK packet arrives
+                        if bytes[3] and bytes[8]:
+                            self.printFTInfo("File transfer rejected by peer.")
+                            self.connection.abortFileTransfer()
+                            return
+                        
+                        elif bytes[3]:
+                            self.printFTInfo("Receiving file: " + bytes[0])
                         break
                         #handle_packet(parsed)
                     except queue.Empty:
@@ -195,8 +201,7 @@ class FileData():
 
     def printFTInfo(self, message):
         print(f"({datetime.now().strftime("%H:%M")}) [FILE_TRANSFER]: {message}")
-
-    
+  
 
 class Connection():
     fragment_size = MAX_FRAGMENT_SIZE #TODO update on change
@@ -276,6 +281,15 @@ class Connection():
     def handleInput(self):
         user_input = input()
 
+        if G_state == State.FILE_TRANSFER:
+            if user_input in ["Y", "y", "Yes"]:
+                self.sendPacket(self.pd.createPacket('TO FILL FILENAME', ack_num=0, seq_num=0, ack=1))
+            else:
+                self.abortFileTransfer()
+                self.sendPacket(self.pd.createPacket('TO FILL FILENAME', ack_num=0, seq_num=0, ack=1, nack=1))
+
+
+
         #TODO
         # if user_input.startswith("/setfragsize "):
         #     try:
@@ -283,7 +297,7 @@ class Connection():
         #         self.setFragmentSize(new_size)
         #     except ValueError:
         #         print("Invalid command. Usage: /setfragsize <size>")
-        #TODO if message startsWith / and is incorrect commant send warning instead of message
+        #TODO if message startsWith / and is incorrect command send warning instead of message
         if user_input.startswith("/send "):
             file_path = user_input[6:].strip()
             self.fd.sendFile(file_path)
@@ -297,6 +311,9 @@ class Connection():
     def sendPacket(self, packet: bytes):
         self.sock.sendto(packet, (self.peer_ip, self.peer_port))
         #TODO fragmentation and ack storage
+
+    def abortFileTransfer(self):
+        G_state = State.CONNECTED
 
     def end(self):
         pass
@@ -332,7 +349,8 @@ def main():
         if (G_state == State.CONNECTED):
             connection.handleInput()
         if (G_state == State.FILE_TRANSFER):
-            connection.sendPacket(connection.pd.createPacket('', ack_num=0, seq_num=0, ack=1))
+            pass
+            #connection.sendPacket(connection.pd.createPacket('', ack_num=0, seq_num=0, ack=1))
 
 
 
@@ -350,12 +368,13 @@ def receive(sock, src_ip, src_port):
                 handshake_queue.put(bytes)
             elif bytes[6] and bytes[7]: # ftr && ctr
                 G_state = State.FILE_TRANSFER
+                print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
             elif bytes[3]:
                 packet_queue.put(bytes)
             else:
                 printTextMessages(addr, bytes)
         except Exception as e:
-            #print("Receiver error:", e)
+            print("Receiver error:", e)
             pass
 
 
