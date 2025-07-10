@@ -20,6 +20,7 @@ MESSAGES
 
 FILE TRANSFER
 - send a CTR packet with filename and length and wain for ACK before proceeding
+- ask to accept, send ack if yes or ack/nack if not
 
 
 PROTOCOL:

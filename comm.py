@@ -16,6 +16,7 @@ class State(Enum):
     HANDSHAKE = 1
     CONNECTED = 2
     FILE_TRANSFER = 3
+    FILE_RECEIVE = 4
     EXITING = 10
 
 #!DEBUG
@@ -75,6 +76,7 @@ class PacketData():
         nack=(flags >> 2) & 1
         # ftr=(flags >> 1) & 1
 
+        # Does not return a dictionary for performance reasons
         return (data, ack_num, seq_num, ack, syn, fin, ctr, ftr, nack, None, None, checksum)
     
     def calculateChecksum(self, data: bytes):
@@ -101,6 +103,9 @@ class FileData():
     fragment_size = None
     connection = None
     pd = None
+
+    file_path = None
+    file_name = None # Transfered file
 
     def __init__(self, sock, peer_ip, peer_port, fragment_size, connection, packet_data):
         self.sock = sock
@@ -143,7 +148,7 @@ class FileData():
                 # Send setup packet with total_fragments and filename
 
                 while True:
-                    self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1))
+                    self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1)) #TODO outsource to ack resend
                     self.printFTInfo("File transfer initialization packet sent...")
                     try:
                         bytes = packet_queue.get(timeout=3)  # Blocks until ACK packet arrives
@@ -153,14 +158,14 @@ class FileData():
                             return
                         
                         elif bytes[3]:
-                            self.printFTInfo("Receiving file: " + bytes[0])
+                            self.printFTInfo("Sending file: " + self.file_name)
                         break
                         #handle_packet(parsed)
                     except queue.Empty:
                         self.printFTInfo("No reply to init packet...")
                         continue
 
-                print("RECEIVED ACK PACKET FOR" + file_path)
+                print("RECEIVED ACK PACKET FOR " + file_path)
                 # setup_packet = Packet(
                 #     seq_num=self.file_seq_num,
                 #     ftr=1,
@@ -225,7 +230,7 @@ class Connection():
         self.pd = PacketData()
         self.fd = FileData(self.sock, self.peer_ip, self.peer_port, self.fragment_size, self, self.pd)
 
-        threading.Thread(target=receive, args=(self.sock, src_ip, src_port), daemon=True).start()
+        threading.Thread(target=receive, args=(self.sock, src_ip, src_port, self), daemon=True).start()
 
     def handshake(self):
         global G_state
@@ -281,12 +286,14 @@ class Connection():
     def handleInput(self):
         user_input = input()
 
-        if G_state == State.FILE_TRANSFER:
+        if G_state == State.FILE_RECEIVE:
             if user_input in ["Y", "y", "Yes"]:
-                self.sendPacket(self.pd.createPacket('TO FILL FILENAME', ack_num=0, seq_num=0, ack=1))
+                self.sendPacket(self.pd.createPacket("", ack_num=0, seq_num=0, ack=1))
+                return
             else:
                 self.abortFileTransfer()
-                self.sendPacket(self.pd.createPacket('TO FILL FILENAME', ack_num=0, seq_num=0, ack=1, nack=1))
+                self.sendPacket(self.pd.createPacket("", ack_num=0, seq_num=0, ack=1, nack=1))
+                return
 
 
 
@@ -299,8 +306,9 @@ class Connection():
         #         print("Invalid command. Usage: /setfragsize <size>")
         #TODO if message startsWith / and is incorrect command send warning instead of message
         if user_input.startswith("/send "):
-            file_path = user_input[6:].strip()
-            self.fd.sendFile(file_path)
+            self.fd.file_path = user_input[6:].strip()
+            self.fd.file_name = os.path.basename(self.fd.file_path)
+            self.fd.sendFile(self.fd.file_path)
         # elif user_input.startswith("/disconnect"):
         #     self.trerminateConnection()
         else:
@@ -313,7 +321,10 @@ class Connection():
         #TODO fragmentation and ack storage
 
     def abortFileTransfer(self):
+        global G_state
         G_state = State.CONNECTED
+        self.fd.file_name = None
+        self.fd.file_path = None
 
     def end(self):
         pass
@@ -354,27 +365,27 @@ def main():
 
 
 
-def receive(sock, src_ip, src_port):
+def receive(sock, src_ip, src_port, connection):
     global G_state
 
-    pd = PacketData()
     sock.bind((src_ip, src_port))
 
     while G_state != State.EXITING:
         try:
             packet, addr = sock.recvfrom(BUFFER_SIZE)
-            bytes = pd.parsePacket(packet)
+            bytes = connection.pd.parsePacket(packet) # 1:data 2:ack_num 3:seq_num 4:ack 5:syn 6:fin 7:ctr 8:ftr 9:nack 10:None 11:None 12:checksum
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
             elif bytes[6] and bytes[7]: # ftr && ctr
-                G_state = State.FILE_TRANSFER
+                G_state = State.FILE_RECEIVE
+                connection.fd.file_name = bytes[0]
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
-            elif bytes[3]:
+            elif bytes[3]: # 
                 packet_queue.put(bytes)
-            else:
+            elif not bytes[4] or not bytes[9]: # not ack nor nack
                 printTextMessages(addr, bytes)
         except Exception as e:
-            print("Receiver error:", e)
+            #print("Receiver error:", e)
             pass
 
 
