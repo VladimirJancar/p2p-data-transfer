@@ -28,6 +28,8 @@ BUFFER_SIZE = 2048
 MAX_FRAGMENT_SIZE = 1400
 
 G_state = State.INPUT
+G_seq_num = random.randint(0, 1000) #TODO handle max uint_32 wrapping
+
 #TODO text, file, handshake separate queue
 packet_queue = queue.Queue()
 handshake_queue = queue.Queue()
@@ -133,59 +135,60 @@ class FileData():
             self.printFTInfo("Error sending file: " + e) 
 
     def sendBytes(self, file_path):
-        try: #TODO need this?
-            file_name = os.path.basename(file_path)
-            with open(file_path, 'rb') as file:
-                # data = file.read()
-                # fragments = self.protocol.fragmentData(data.decode('latin1'))
-                # self.total_fragments = len(fragments)
+        # try:
+        
+        file_name = os.path.basename(file_path)
+        with open(file_path, 'rb') as file:
+            # data = file.read()
+            # fragments = self.protocol.fragmentData(data.decode('latin1'))
+            # self.total_fragments = len(fragments)
 
-                #TODO LATER seek window within the file
-                # with open(file_path, "rb") as f:
-                #     f.seek(packet_seq * FRAGMENT_SIZE)
-                # data = f.read(FRAGMENT_SIZE)
+            #TODO LATER seek window within the file
+            # with open(file_path, "rb") as f:
+            #     f.seek(packet_seq * FRAGMENT_SIZE)
+            # data = f.read(FRAGMENT_SIZE)
 
-                # Send setup packet with total_fragments and filename
+            # Send setup packet with total_fragments and filename
 
-                while True:
-                    self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1)) #TODO outsource to ack resend
-                    self.printFTInfo("File transfer initialization packet sent...")
-                    try:
-                        bytes = packet_queue.get(timeout=3)  # Blocks until ACK packet arrives
-                        if bytes[3] and bytes[8]:
-                            self.printFTInfo("File transfer rejected by peer.")
-                            self.connection.abortFileTransfer()
-                            return
-                        
-                        elif bytes[3]:
-                            self.printFTInfo("Sending file: " + self.file_name)
-                        break
-                        #handle_packet(parsed)
-                    except queue.Empty:
-                        self.printFTInfo("No reply to init packet...")
-                        continue
+            while True:
+                self.connection.sendPacket(self.pd.createPacket(file_name, 0, 0, ftr=1, ctr=1)) #TODO outsource to ack resend
+                self.printFTInfo("File transfer initialization packet sent...")
+                try:
+                    bytes = packet_queue.get(timeout=3)  # Blocks until ACK packet arrives
+                    if bytes[3] and bytes[8]:
+                        self.printFTInfo("File transfer rejected by peer.")
+                        self.connection.abortFileTransfer()
+                        return
+                    
+                    elif bytes[3]:
+                        self.printFTInfo("Sending file: " + self.file_name)
+                    break
+                    #handle_packet(parsed)
+                except queue.Empty:
+                    self.printFTInfo("No reply to init packet...")
+                    continue
 
-                print("RECEIVED ACK PACKET FOR " + file_path)
-                # setup_packet = Packet(
-                #     seq_num=self.file_seq_num,
-                #     ftr=1,
-                #     ctr=1,
-                #     data=f"{self.total_fragments:08x}|{filename}"
-                # )
-                # peer.sendPacket(dest_ip, dest_port, setup_packet)
+            print("RECEIVED ACK PACKET FOR " + file_path)
+            # setup_packet = Packet(
+            #     seq_num=self.file_seq_num,
+            #     ftr=1,
+            #     ctr=1,
+            #     data=f"{self.total_fragments:08x}|{filename}"
+            # )
+            # peer.sendPacket(dest_ip, dest_port, setup_packet)
 
-                # Start sending and receiving threads #TODO
-                # send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
-                # ack_thread = threading.Thread(target=self.receiveAcks, args=())
+            # Start sending and receiving threads #TODO
+            # send_thread = threading.Thread(target=self.sendFragments, args=(peer, dest_ip, dest_port, fragments))
+            # ack_thread = threading.Thread(target=self.receiveAcks, args=())
 
-                # send_thread.start()
-                # ack_thread.start()
-                 
-                
-        except FileNotFoundError:
-            self.printFTInfo("File not found.")
-        except Exception as e:
-            self.printFTInfo("Error sending file: " + e)
+            # send_thread.start()
+            # ack_thread.start()
+             
+            
+        # except FileNotFoundError:
+        #     self.printFTInfo("File not found.")
+        # except Exception as e:
+        #     self.printFTInfo("Error sending file: " + e)
 
 
     # def reconstructFile(self):
@@ -234,7 +237,7 @@ class Connection():
 
     def handshake(self):
         global G_state
-        my_seq = random.randint(0, 10000) #TODO
+        global G_seq_num
 
         syn_sent = False
         syn_ack_sent = False
@@ -245,7 +248,8 @@ class Connection():
             handshake_queue.queue.clear()
 
         while True:
-            self.sendPacket(self.pd.createPacket('', 0, my_seq, 0, 1))
+            self.sendPacket(self.pd.createPacket('', ack_num=0, seq_num=G_seq_num, ack=0, syn=1))
+            G_seq_num += 1 #! SEQ addition
             printHandshakeInfo("SYN packet sent...")
             syn_sent = True
             try:
@@ -265,7 +269,9 @@ class Connection():
                 my_seq += 1
                 printHandshakeInfo("SYN-ACK packet received...")
                 printHandshakeInfo("Sending ACK packet...")
-                self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=my_seq, ack=1))
+                self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=0, ack=1))
+                # G_seq_num += 1 #! SEQ addition
+                #TODO ACK
                 printHandshakeInfo("Connected.")
                 G_state = State.CONNECTED
                 break
@@ -274,6 +280,7 @@ class Connection():
                 printHandshakeInfo("SYN packet received...")
                 printHandshakeInfo("Sending SYN-ACK packet...")
                 self.sendPacket(self.pd.createPacket('', 0, my_seq, 1, 1))
+                #TODO syn-ack seq?
                 syn_ack_sent = True
 
             elif syn_ack_sent and ack:
@@ -284,15 +291,18 @@ class Connection():
         print()
 
     def handleInput(self):
+        global G_seq_num
         user_input = input()
 
         if G_state == State.FILE_RECEIVE:
             if user_input in ["Y", "y", "Yes"]:
-                self.sendPacket(self.pd.createPacket("", ack_num=0, seq_num=0, ack=1))
+                self.sendPacket(self.pd.createPacket("", ack_num=0, seq_num=G_seq_num, ack=1))
+                G_seq_num += 1 #! SEQ addition
                 return
             else:
                 self.abortFileTransfer()
                 self.sendPacket(self.pd.createPacket("", ack_num=0, seq_num=0, ack=1, nack=1))
+                #TODO ACK NUM, make ack into a separate function for sending ack packets
                 return
 
 
@@ -312,9 +322,8 @@ class Connection():
         # elif user_input.startswith("/disconnect"):
         #     self.trerminateConnection()
         else:
-            pd = PacketData()
-            packet = pd.createPacket(user_input, 0, 0)
-            self.sock.sendto(packet, (self.peer_ip, self.peer_port))
+            self.sendPacket(self.pd.createPacket(user_input, ack_num=0, seq_num=G_seq_num))
+            G_seq_num += 1 #! SEQ addition
 
     def sendPacket(self, packet: bytes):
         self.sock.sendto(packet, (self.peer_ip, self.peer_port))
