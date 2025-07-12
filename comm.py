@@ -1,11 +1,12 @@
-from datetime import datetime
 import os
 import queue
 import random
 import socket
 import struct
 import threading
+import numpy as np
 from enum import Enum
+from datetime import datetime, time
 
 #!DEBUG
 import argparse
@@ -26,9 +27,16 @@ PEER_IP = "127.0.0.1"
 #!DEBUG
 BUFFER_SIZE = 2048
 MAX_FRAGMENT_SIZE = 1400
+PACKET_TIMEOUT = 0.5 # seconds
+WINDOW_SIZE = 256
 
 G_state = State.INPUT
-G_seq_num = random.randint(0, 1000) #TODO handle max uint_32 wrapping
+G_seq_num = random.randint(0, 1000) # max uint_32 #TODO handle max uint_32 wrapping
+
+# ACK tracking #TODO can be non global?
+G_acks = np.zeros(WINDOW_SIZE, dtype=bool)  # Track 64k packet ACKs
+G_send_times = np.zeros(WINDOW_SIZE)
+G_sent_packets = [None] * WINDOW_SIZE
 
 #TODO text, file, handshake separate queue
 packet_queue = queue.Queue()
@@ -39,7 +47,7 @@ handshake_queue = queue.Queue()
 
 # packet_buffer = np.zeros(1000, dtype=np.uint8)  # 1000-byte buffer
 
-# acks = np.zeros(65536, dtype=bool)  # Track 64k packet ACKs
+
 # acks[packet_seq] = True
 
 
@@ -279,7 +287,7 @@ class Connection():
             elif syn:
                 printHandshakeInfo("SYN packet received...")
                 printHandshakeInfo("Sending SYN-ACK packet...")
-                self.sendPacket(self.pd.createPacket('', 0, my_seq, 1, 1))
+                self.sendPacket(self.pd.createPacket('', , my_seq, 1, 1))
                 #TODO syn-ack seq?
                 syn_ack_sent = True
 
@@ -326,8 +334,16 @@ class Connection():
             G_seq_num += 1 #! SEQ addition
 
     def sendPacket(self, packet: bytes):
+        global G_send_times
+        global G_sent_packets
+        global G_seq_num
+        global G_acks
+        #TODO wont be slow?
+        index = G_seq_num % WINDOW_SIZE 
+        G_sent_packets[index] = packet
+        G_send_times[index] = time.time()
+        G_acks[index] = False
         self.sock.sendto(packet, (self.peer_ip, self.peer_port))
-        #TODO fragmentation and ack storage
 
     def abortFileTransfer(self):
         global G_state
