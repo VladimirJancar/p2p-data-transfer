@@ -14,6 +14,9 @@ SEQUENCE NUMBER:
 
 - sequence numbers are in terms of bytes, not packets. It is kept as global variable as it will be used throughout the peer (might change later to just be in the single instance of Connection())
 
+ARQ:
+- upon sending packets, their info is stored (send time, seq_num, payload). 
+
 THREADS:
 - always listening on a separate thread but ignores if not in receiving state
 

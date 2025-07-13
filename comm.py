@@ -6,7 +6,8 @@ import struct
 import threading
 import numpy as np
 from enum import Enum
-from datetime import datetime, time
+from datetime import datetime
+import time
 
 #!DEBUG
 import argparse
@@ -274,7 +275,6 @@ class Connection():
             syn = packet[4]
 
             if syn_sent and syn and ack:
-                my_seq += 1
                 printHandshakeInfo("SYN-ACK packet received...")
                 printHandshakeInfo("Sending ACK packet...")
                 self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=0, ack=1))
@@ -287,7 +287,7 @@ class Connection():
             elif syn:
                 printHandshakeInfo("SYN packet received...")
                 printHandshakeInfo("Sending SYN-ACK packet...")
-                self.sendPacket(self.pd.createPacket('', , my_seq, 1, 1))
+                self.sendPacket(self.pd.createPacket('', ack_num=0, seq_num=0, ack=1, syn=1))
                 #TODO syn-ack seq?
                 syn_ack_sent = True
 
@@ -398,16 +398,19 @@ def receive(sock, src_ip, src_port, connection):
     while G_state != State.EXITING:
         try:
             packet, addr = sock.recvfrom(BUFFER_SIZE)
-            bytes = connection.pd.parsePacket(packet) # 1:data 2:ack_num 3:seq_num 4:ack 5:syn 6:fin 7:ctr 8:ftr 9:nack 10:None 11:None 12:checksum
+            bytes = connection.pd.parsePacket(packet) # 0:data 1:ack_num 2:seq_num 3:ack 4:syn 5:fin 6:ctr 7:ftr 8:nack 9:None 10:None 11:checksum
+            
+            # if bytes[4]
+
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
             elif bytes[6] and bytes[7]: # ftr && ctr
                 G_state = State.FILE_RECEIVE
                 connection.fd.file_name = bytes[0]
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
-            elif bytes[3]: # 
+            elif bytes[7]:
                 packet_queue.put(bytes)
-            elif not bytes[4] or not bytes[9]: # not ack nor nack
+            elif not bytes[3] or not bytes[8]: # not ack nor nack
                 printTextMessages(addr, bytes)
         except Exception as e:
             #print("Receiver error:", e)
