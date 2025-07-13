@@ -41,7 +41,7 @@ G_sent_packets = [None] * WINDOW_SIZE
 
 #TODO text, file, handshake separate queue
 packet_queue = queue.Queue()
-handshake_queue = queue.Queue()
+handshake_queue = queue.Queue() #TODO use SimpleQueue()
 
 #TODO packet storage
 # import numpy as np
@@ -243,6 +243,8 @@ class Connection():
         self.fd = FileData(self.sock, self.peer_ip, self.peer_port, self.fragment_size, self, self.pd)
 
         threading.Thread(target=receive, args=(self.sock, src_ip, src_port, self), daemon=True).start()
+        threading.Thread(target=handlePackets, args=(self.peer_ip, self.peer_port, self), daemon=True).start()
+        
 
     def handshake(self):
         global G_state
@@ -389,7 +391,6 @@ def main():
             #connection.sendPacket(connection.pd.createPacket('', ack_num=0, seq_num=0, ack=1))
 
 
-
 def receive(sock, src_ip, src_port, connection):
     global G_state
 
@@ -398,27 +399,40 @@ def receive(sock, src_ip, src_port, connection):
     while G_state != State.EXITING:
         try:
             packet, addr = sock.recvfrom(BUFFER_SIZE)
-            bytes = connection.pd.parsePacket(packet) # 0:data 1:ack_num 2:seq_num 3:ack 4:syn 5:fin 6:ctr 7:ftr 8:nack 9:None 10:None 11:checksum
+            packet_queue.put(packet)
+        except Exception as e:
+            # print("Receiver error:", e)
+            pass
+
+
+def handlePackets(peer_ip, peer_port, connection):
+    global G_state
+    fd = connection.fd # FileData
+    pd = connection.pd # PacketData
+
+    while G_state != State.EXITING:
+        try:
+            packet = packet_queue.get()
+            bytes = pd.parsePacket(packet) # 0:data 1:ack_num 2:seq_num 3:ack 4:syn 5:fin 6:ctr 7:ftr 8:nack 9:None 10:None 11:checksum
             
             # if bytes[4]
-
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
             elif bytes[6] and bytes[7]: # ftr && ctr
                 G_state = State.FILE_RECEIVE
-                connection.fd.file_name = bytes[0]
+                fd.file_name = bytes[0]
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
             elif bytes[7]:
                 packet_queue.put(bytes)
             elif not bytes[3] or not bytes[8]: # not ack nor nack
-                printTextMessages(addr, bytes)
+                printTextMessages(peer_ip, peer_port, bytes)
         except Exception as e:
-            #print("Receiver error:", e)
+        #     #print("Receiver error:", e)
             pass
 
 
-def printTextMessages(addr, bytes):
-    print(f"({datetime.now().strftime("%H:%M")}) {addr[0]}:{addr[1]} >> {bytes[0]}")
+def printTextMessages(peer_ip, peer_port, bytes):
+    print(f"({datetime.now().strftime("%H:%M")}) {peer_ip}:{peer_port} >> {bytes[0]}")
 
 
 def printHandshakeInfo(message):
