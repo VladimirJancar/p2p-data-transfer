@@ -34,10 +34,11 @@ WINDOW_SIZE = 256
 G_state = State.INPUT
 G_seq_num = random.randint(0, 1000) # max uint_32 #TODO handle max uint_32 wrapping
 
-# ACK tracking #TODO can be non global?
-G_acks = np.zeros(WINDOW_SIZE, dtype=bool)  # Track 64k packet ACKs
+# ACK tracking #TODO can be non global
+G_acks = np.zeros(WINDOW_SIZE, dtype=bool)
 G_send_times = np.zeros(WINDOW_SIZE)
 G_sent_packets = [None] * WINDOW_SIZE
+G_base_seq = G_seq_num  # Bottom of the window
 
 #TODO text, file, handshake separate queue
 packet_queue = queue.Queue()
@@ -347,6 +348,9 @@ class Connection():
         G_acks[index] = False
         self.sock.sendto(packet, (self.peer_ip, self.peer_port))
 
+    def sendAck(self, seq_num: int):
+        self.sock.sendto(self.pd.createPacket("", ack_num=seq_num, seq_num=0, ack=1), (self.peer_ip, self.peer_port))
+
     def abortFileTransfer(self):
         global G_state
         G_state = State.CONNECTED
@@ -391,6 +395,60 @@ def main():
             #connection.sendPacket(connection.pd.createPacket('', ack_num=0, seq_num=0, ack=1))
 
 
+def handlePackets(peer_ip, peer_port, connection):
+    global G_state
+    fd = connection.fd # FileData
+    pd = connection.pd # PacketData
+
+    while G_state != State.EXITING:
+        try:
+            packet = packet_queue.get()
+            bytes = pd.parsePacket(packet) # 0:data 1:ack_num 2:seq_num 3:ack 4:syn 5:fin 6:ctr 7:ftr 8:nack 9:None 10:None 11:checksum
+            #TODO replace bytes with data, ack_num ... = parsePacket()
+
+            if (G_state == State.HANDSHAKE):
+                handshake_queue.put(bytes)
+
+            elif bytes[4]: # ack
+                logAck(bytes[1])
+            elif not bytes[4]:
+                connection.sendAck(bytes[2]) 
+            elif bytes[8]: # nack 
+                pass
+                #connection.sendPacket(G_sent_packets[TODO index bytes[1]]) # resend
+            elif bytes[6] and bytes[7]: # ftr && ctr
+                G_state = State.FILE_RECEIVE
+                fd.file_name = bytes[0]
+                print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
+            elif bytes[7]:
+                packet_queue.put(bytes)
+            elif not bytes[3] or not bytes[8]: #~ !ack && !nack
+                printTextMessages(peer_ip, peer_port, bytes)
+        except Exception as e:
+        #     #print("Receiver error:", e)
+            pass
+
+
+def logAck(ack_num: int): #TODO
+    global G_acks
+    global G_base_seq
+    index = ack_num % WINDOW_SIZE
+    print("logging ack: ", ack_num, ", index: ", index)
+    G_acks[index] = True
+
+
+def slideWindow(next_seq: int): #TODO
+    global G_base_seq
+    while G_base_seq < next_seq:
+        index = G_base_seq % WINDOW_SIZE
+        if G_acks[index]:
+            G_acks[index] = False
+            G_sent_packets[index] = None
+            G_base_seq += 1
+        else:
+            break
+
+
 def receive(sock, src_ip, src_port, connection):
     global G_state
 
@@ -402,32 +460,6 @@ def receive(sock, src_ip, src_port, connection):
             packet_queue.put(packet)
         except Exception as e:
             # print("Receiver error:", e)
-            pass
-
-
-def handlePackets(peer_ip, peer_port, connection):
-    global G_state
-    fd = connection.fd # FileData
-    pd = connection.pd # PacketData
-
-    while G_state != State.EXITING:
-        try:
-            packet = packet_queue.get()
-            bytes = pd.parsePacket(packet) # 0:data 1:ack_num 2:seq_num 3:ack 4:syn 5:fin 6:ctr 7:ftr 8:nack 9:None 10:None 11:checksum
-            
-            # if bytes[4]
-            if (G_state == State.HANDSHAKE):
-                handshake_queue.put(bytes)
-            elif bytes[6] and bytes[7]: # ftr && ctr
-                G_state = State.FILE_RECEIVE
-                fd.file_name = bytes[0]
-                print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
-            elif bytes[7]:
-                packet_queue.put(bytes)
-            elif not bytes[3] or not bytes[8]: # not ack nor nack
-                printTextMessages(peer_ip, peer_port, bytes)
-        except Exception as e:
-        #     #print("Receiver error:", e)
             pass
 
 

@@ -10,6 +10,8 @@ handshake -> establish connection -> new Connection()
 
 SEQUENCE NUMBER:
 - all packets are numbered, beginning with randomly generated ISN (initial sequence number)
+- suing sequence number based on packet number instead of byte size based seq num for simplicity
+
 "TCP uses a sequence number to identify each byte of data. The sequence number identifies the order of the bytes sent from each computer so that the data can be reconstructed in order, regardless of any out-of-order delivery that may occur. The sequence number of the first byte is chosen by the transmitter for the first packet, which is flagged SYN. This number can be arbitrary, and should, in fact, be unpredictable to defend against TCP sequence prediction attacks. "
 
 - sequence numbers are in terms of bytes, not packets. It is kept as global variable as it will be used throughout the peer (might change later to just be in the single instance of Connection())
