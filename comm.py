@@ -280,7 +280,7 @@ class Connection():
             if syn_sent and syn and ack:
                 printHandshakeInfo("SYN-ACK packet received...")
                 printHandshakeInfo("Sending ACK packet...")
-                self.sendPacket(self.pd.createPacket('', ack_num=seq_num + 1, seq_num=0, ack=1))
+                self.sendAck(seq_num)
                 # G_seq_num += 1 #! SEQ addition
                 #TODO ACK
                 printHandshakeInfo("Connected.")
@@ -290,7 +290,7 @@ class Connection():
             elif syn:
                 printHandshakeInfo("SYN packet received...")
                 printHandshakeInfo("Sending SYN-ACK packet...")
-                self.sendPacket(self.pd.createPacket('', ack_num=0, seq_num=0, ack=1, syn=1))
+                self.sendPacket(self.pd.createPacket('', ack_num=seq_num, seq_num=G_seq_num, ack=1, syn=1))
                 #TODO syn-ack seq?
                 syn_ack_sent = True
 
@@ -408,20 +408,23 @@ def handlePackets(peer_ip, peer_port, connection):
 
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
-
-            elif bytes[4]: # ack
+                
+            elif bytes[3]: # ack
                 logAck(bytes[1])
-            elif not bytes[4]:
+                
+
+            if not bytes[3]:
                 connection.sendAck(bytes[2]) 
-            elif bytes[8]: # nack 
+
+            if bytes[8]: # nack 
                 pass
                 #connection.sendPacket(G_sent_packets[TODO index bytes[1]]) # resend
             elif bytes[6] and bytes[7]: # ftr && ctr
                 G_state = State.FILE_RECEIVE
                 fd.file_name = bytes[0]
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
-            elif bytes[7]:
-                packet_queue.put(bytes)
+            elif bytes[7]: #ftr
+                packet_queue.put(bytes) #TODO remove
             elif not bytes[3] or not bytes[8]: #~ !ack && !nack
                 printTextMessages(peer_ip, peer_port, bytes)
         except Exception as e:
