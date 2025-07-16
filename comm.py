@@ -271,8 +271,6 @@ class Connection():
                 printHandshakeInfo("No reply to SYN packet...")
                 continue
 
-            #TODO ack numbering
-            ack_num = packet[1]
             seq_num = packet[2]
             ack = packet[3]
             syn = packet[4]
@@ -281,8 +279,6 @@ class Connection():
                 printHandshakeInfo("SYN-ACK packet received...")
                 printHandshakeInfo("Sending ACK packet...")
                 self.sendAck(seq_num)
-                # G_seq_num += 1 #! SEQ addition
-                #TODO ACK
                 printHandshakeInfo("Connected.")
                 G_state = State.CONNECTED
                 break
@@ -291,7 +287,6 @@ class Connection():
                 printHandshakeInfo("SYN packet received...")
                 printHandshakeInfo("Sending SYN-ACK packet...")
                 self.sendPacket(self.pd.createPacket('', ack_num=seq_num, seq_num=G_seq_num, ack=1, syn=1))
-                #TODO syn-ack seq?
                 syn_ack_sent = True
 
             elif syn_ack_sent and ack:
@@ -408,12 +403,10 @@ def handlePackets(peer_ip, peer_port, connection):
 
             if (G_state == State.HANDSHAKE):
                 handshake_queue.put(bytes)
-                
-            elif bytes[3]: # ack
-                logAck(bytes[1])
-                
 
-            if not bytes[3]:
+            if bytes[3]: # ack
+                logAck(bytes[1])
+            elif not bytes[3]:
                 connection.sendAck(bytes[2]) 
 
             if bytes[8]: # nack 
@@ -425,14 +418,14 @@ def handlePackets(peer_ip, peer_port, connection):
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
             elif bytes[7]: #ftr
                 packet_queue.put(bytes) #TODO remove
-            elif not bytes[3] or not bytes[8]: #~ !ack && !nack
+            elif not bytes[3] and not bytes[4] and not bytes[8]: #~ !ack && !nack
                 printTextMessages(peer_ip, peer_port, bytes)
         except Exception as e:
         #     #print("Receiver error:", e)
             pass
 
 
-def logAck(ack_num: int): #TODO
+def logAck(ack_num: int):
     global G_acks
     global G_base_seq
     index = ack_num % WINDOW_SIZE
@@ -450,6 +443,16 @@ def slideWindow(next_seq: int): #TODO
             G_base_seq += 1
         else:
             break
+
+
+def checkAckTimeouts(sock, address, base_seq: int, next_seq: int):
+    now = time.time()
+    for i in range(base_seq, next_seq):
+        index = i % MAX_WINDOW_SIZE
+        if not acknowledged[index] and now - sent_times[index] > PACKET_TIMEOUT:
+            print(f"[Resending] seq={i}")
+            sock.sendto(sent_packets[index], address)
+            sent_times[index] = now
 
 
 def receive(sock, src_ip, src_port, connection):
