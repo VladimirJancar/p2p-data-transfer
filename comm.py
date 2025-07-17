@@ -86,7 +86,6 @@ class PacketData():
         ctr=(flags >> 4) & 1
         ftr=(flags >> 3) & 1
         nack=(flags >> 2) & 1
-        # ftr=(flags >> 1) & 1
 
         # Does not return a dictionary for performance reasons
         return (data, ack_num, seq_num, ack, syn, fin, ctr, ftr, nack, None, None, checksum)
@@ -320,13 +319,15 @@ class Connection():
         #         self.setFragmentSize(new_size)
         #     except ValueError:
         #         print("Invalid command. Usage: /setfragsize <size>")
-        #TODO if message startsWith / and is incorrect command send warning instead of message
+        
         if user_input.startswith("/send "):
             self.fd.file_path = user_input[6:].strip()
             self.fd.file_name = os.path.basename(self.fd.file_path)
             self.fd.sendFile(self.fd.file_path)
         # elif user_input.startswith("/disconnect"):
         #     self.trerminateConnection()
+        elif user_input.startswith("/"):#TODO if message startsWith / and is incorrect command send warning instead of message
+            pass
         else:
             self.sendPacket(self.pd.createPacket(user_input, ack_num=0, seq_num=G_seq_num))
             G_seq_num += 1 #! SEQ addition
@@ -417,7 +418,7 @@ def handlePackets(peer_ip, peer_port, connection):
                 fd.file_name = bytes[0]
                 print(f"Peer wants to transfer file '{bytes[0]}'; Do you accept? [Y/N]")
             elif bytes[7]: #ftr
-                packet_queue.put(bytes) #TODO remove
+                packet_queue.put(bytes)
             elif not bytes[3] and not bytes[4] and not bytes[8]: #~ !ack && !nack
                 printTextMessages(peer_ip, peer_port, bytes)
         except Exception as e:
@@ -425,7 +426,7 @@ def handlePackets(peer_ip, peer_port, connection):
             pass
 
 
-def logAck(ack_num: int):
+def logAck(ack_num: int): #TODO
     global G_acks
     global G_base_seq
     index = ack_num % WINDOW_SIZE
@@ -445,14 +446,14 @@ def slideWindow(next_seq: int): #TODO
             break
 
 
-def checkAckTimeouts(sock, address, base_seq: int, next_seq: int):
+def checkAckTimeouts(sock, address, base_seq: int, next_seq: int): #TODO
     now = time.time()
-    for i in range(base_seq, next_seq):
-        index = i % MAX_WINDOW_SIZE
-        if not acknowledged[index] and now - sent_times[index] > PACKET_TIMEOUT:
-            print(f"[Resending] seq={i}")
-            sock.sendto(sent_packets[index], address)
-            sent_times[index] = now
+    # for i in range(base_seq, next_seq):
+    #     index = i % MAX_WINDOW_SIZE
+    #     if not acknowledged[index] and now - sent_times[index] > PACKET_TIMEOUT:
+    #         print(f"[Resending] seq={i}")
+    #         sock.sendto(sent_packets[index], address)
+    #         sent_times[index] = now
 
 
 def receive(sock, src_ip, src_port, connection):
